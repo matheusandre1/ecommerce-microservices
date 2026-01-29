@@ -1,8 +1,11 @@
 package com.ecommerce.util;
 
+import com.ecommerce.exception.CryptoException;
 import org.bouncycastle.crypto.generators.Argon2BytesGenerator;
 import org.bouncycastle.crypto.params.Argon2Parameters;
 import javax.crypto.spec.GCMParameterSpec;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -12,7 +15,6 @@ import java.util.Base64;
 public class CryptoUtil {
 
     private static final String AES_KEY = System.getenv().getOrDefault("AES_ENCRYPTION_KEY", "30e921e913bc06d7b9e2493fef4a93ac");
-
 
     public static String encrypt(String data) {
         try {
@@ -25,7 +27,7 @@ public class CryptoUtil {
             byte[] encrypted = cipher.doFinal(data.getBytes());
             return Base64.getEncoder().encodeToString(iv) + ":" + Base64.getEncoder().encodeToString(encrypted);
         } catch (Exception e) {
-            throw new RuntimeException("Encryption error", e);
+            throw new CryptoException("Encryption error", e);
         }
     }
 
@@ -40,11 +42,21 @@ public class CryptoUtil {
             cipher.init(Cipher.DECRYPT_MODE, key, spec);
             return new String(cipher.doFinal(encryptedData));
         } catch (Exception e) {
-            throw new RuntimeException("Decryption error", e);
+            throw new CryptoException("Decryption error", e);
         }
     }
 
-    public static String hashPassword(String password){
+    public static String hashToken(String token) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(token.getBytes());
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static String hashPassword(String password) {
         byte[] salt = new byte[16];
         new SecureRandom().nextBytes(salt);
 
@@ -62,10 +74,10 @@ public class CryptoUtil {
 
         String saltB64 = Base64.getEncoder().encodeToString(salt);
         String hashB64 = Base64.getEncoder().encodeToString(hash);
-        return saltB64 +":" + params.getIterations() + ":" + params.getMemory() + ":" + params.getLanes() + ":" + hashB64;
+        return saltB64 + ":" + params.getIterations() + ":" + params.getMemory() + ":" + params.getLanes() + ":" + hashB64;
     }
 
-    public static boolean verifyPassword(String password, String stored){
+    public static boolean verifyPassword(String password, String stored) {
         String[] parts = stored.split(":");
         byte[] salt = Base64.getDecoder().decode(parts[0]);
         int iterations = Integer.parseInt(parts[1]);
