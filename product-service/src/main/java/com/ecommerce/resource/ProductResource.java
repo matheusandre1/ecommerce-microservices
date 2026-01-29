@@ -2,6 +2,9 @@ package com.ecommerce.resource;
 
 import com.ecommerce.entity.Product;
 import com.ecommerce.service.ProductService;
+import io.quarkus.security.Authenticated;
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.*;
@@ -54,6 +57,7 @@ public class ProductResource {
     }
 
     @POST
+    @RolesAllowed({"ADMIN", "SELLER"})
     public Response create(@Valid Product product) {
         LOG.infof("POST /products - Creating product: %s", product.name);
         Product created = productService.create(product);
@@ -62,6 +66,7 @@ public class ProductResource {
 
     @PUT
     @Path("/{id}")
+    @RolesAllowed({"ADMIN", "SELLER"})
     public Response update(@PathParam("id") String id, @Valid Product product) {
         LOG.infof("PUT /products/%s - Updating product", id);
         Product updated = productService.update(id, product);
@@ -73,6 +78,7 @@ public class ProductResource {
 
     @DELETE
     @Path("/{id}")
+    @RolesAllowed("ADMIN")
     public Response delete(@PathParam("id") String id) {
         LOG.infof("DELETE /products/%s", id);
         boolean deleted = productService.delete(id);
