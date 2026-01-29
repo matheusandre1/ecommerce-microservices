@@ -44,6 +44,6 @@ nb-configuration.xml
 # TLS Certificates
 .certs/
 /privateKey.b64
-/privateKey.pem
+/src/main/resources/privateKey.pem
 /publicKey.b64
-/publicKey.pem
+/src/main/resources/publicKey.pem
