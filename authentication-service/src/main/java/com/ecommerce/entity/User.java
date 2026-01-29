@@ -14,6 +14,7 @@ public class User extends PanacheEntity {
 
     @NotBlank(message = "Email is required")
     @Email
+    @Column(unique = true, updatable = false)
     public String email;
     @NotBlank(message = "Password is required")
     public String passwordHash;
@@ -21,6 +22,6 @@ public class User extends PanacheEntity {
     public String fullName;
     @Enumerated(EnumType.STRING)
     public Role role;
-    public boolean active = true;
+    public boolean active;
     public LocalDateTime createdAt = LocalDateTime.now();
 }
