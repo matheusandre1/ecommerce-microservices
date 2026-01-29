@@ -34,6 +34,7 @@ This is a Quarkus-based microservice for user authentication in an e-commerce sy
    - `ENCRYPTION_KEY`: 32-character hexadecimal key for AES encryption (used in `CryptoUtil`).
    - `JWT_KEY_LOCATION`: Absolute path to `privateKey.pem`.
    - `JWT_PUBLIC_KEY_LOCATION`: Absolute path to `publicKey.pem`.
+   - `FRONTEND_BASE_URL`: Base URL of the frontend application (e.g., `https://myapp.com`) for constructing email links.
 
    Example `.env`:
    ```
@@ -44,6 +45,7 @@ This is a Quarkus-based microservice for user authentication in an e-commerce sy
    ENCRYPTION_KEY=30e921e913bc06d7b9e2493fef4a93ac
    JWT_KEY_LOCATION=/path/to/privateKey.pem
    JWT_PUBLIC_KEY_LOCATION=/path/to/publicKey.pem
+   FRONTEND_BASE_URL=https://myapp.com
    ```
 
 ## Running the Application
@@ -82,9 +84,23 @@ For native executable:
 
 The service exposes REST endpoints under `/auth`:
 
-- `POST /auth/register`: Register a new user.
+- `POST /auth/register`: Register a new user and trigger an activation email.
   - Body: `{"email": "user@example.com", "password": "password", "fullName": "User Name"}`
   - Response: User details.
+  - Note: A message is published to send an activation email to the user's email address.
+
+- `POST /auth/activate`: Activate a user account using the token from the activation email.
+  - Body: `{"token": "activation-token-here"}`
+  - Response: Success message.
+
+- `POST /auth/request-password-reset`: Request a password reset and trigger an email.
+  - Body: `{"email": "user@example.com"}`
+  - Response: Success message.
+  - Note: A message is published to send a password reset email if the account exists.
+
+- `POST /auth/reset-password`: Reset the password using the token from the reset email.
+  - Body: `{"token": "reset-token-here", "newPassword": "new-password"}`
+  - Response: Success message.
 
 - `POST /auth/login`: Authenticate user and return tokens.
   - Body: `{"email": "user@example.com", "password": "password"}`
@@ -95,6 +111,15 @@ The service exposes REST endpoints under `/auth`:
   - Response: New tokens.
 
 All endpoints return JSON responses. Use the access token in the `Authorization: Bearer <token>` header for authenticated requests.
+
+## Email Notifications
+
+The service integrates with an email notification microservice via Kafka events to send user emails:
+
+- **User Registration**: Upon successful registration, an activation email is sent containing a direct link to activate the account (e.g., `https://myapp.com/activate?token=<token>`).
+- **Password Reset**: When a password reset is requested, an email with a reset link is sent (e.g., `https://myapp.com/reset-password?token=<token>`).
+
+The frontend base URL is configured via the `FRONTEND_BASE_URL` environment variable, allowing different URLs for development, staging, and production environments. The email service receives pre-built URLs, eliminating the need for URL construction logic in the notification service. Events are published to the `authentication-email` Kafka topic.
 
 ## Security Best Practices Implemented
 
