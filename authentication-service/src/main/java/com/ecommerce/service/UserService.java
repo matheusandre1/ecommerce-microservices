@@ -1,17 +1,22 @@
 package com.ecommerce.service;
 
-import com.ecommerce.dto.RegisterRequest;
-import com.ecommerce.dto.UserResponse;
+import com.ecommerce.dto.*;
+import com.ecommerce.entity.ActionType;
 import com.ecommerce.entity.Role;
 import com.ecommerce.entity.User;
+import com.ecommerce.entity.UserActionToken;
+import com.ecommerce.event.TokenConfirmationEvent;
+import com.ecommerce.event.TokenUrlEvent;
 import com.ecommerce.repository.UserRepository;
 import com.ecommerce.util.CryptoUtil;
 import io.quarkus.runtime.StartupEvent;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -25,10 +30,20 @@ public class UserService {
 
     @Inject
     UserRepository userRepository;
+    @Inject
+    UserActionTokenService userActionTokenService;
+    @Inject
+    Event<TokenUrlEvent> tokenUrlEventEmitter;
+    @Inject
+    Event<TokenConfirmationEvent> tokenConfirmationEventEmitter;
 
     @Inject
     @ConfigProperty(name = "ADMIN_PASSWORD", defaultValue = "")
     String adminPassword;
+
+    @Inject
+    @ConfigProperty(name = "app.frontend.base-url")
+    String frontendBaseUrl;
 
     @Transactional
     void onStart(@Observes StartupEvent ev) {
@@ -61,10 +76,56 @@ public class UserService {
 
         String hashedPassword = CryptoUtil.hashPassword(request.password());
         User user = request.toUser(hashedPassword);
+        user.active = false;
 
         userRepository.persist(user);
         LOG.infof("User self-registered successfully: %d", user.id);
+        UserActionToken token = userActionTokenService.createForUser(user.id, ActionType.ACTIVATE);
+        String rawToken = userActionTokenService.getRawToken(token);
+
+        LOG.debugf("Activation token created: %s for user %s", rawToken, user.email);
+
+        String activationUrl = frontendBaseUrl + "/activate?token=" + rawToken;
+        tokenUrlEventEmitter.fire(new TokenUrlEvent(user.id, user.email, ActionType.ACTIVATE, activationUrl));
         return UserResponse.from(user);
+    }
+
+    @Transactional
+    public void activateUser(ActivationRequest request) {
+        var token = userActionTokenService.findByToken(request.token(), ActionType.ACTIVATE);
+        if (token == null) {
+            throw new SecurityException("Invalid activation token");
+        }
+        User user = userRepository.findById(token.userId);
+        user.active = true;
+        user.persist();
+        userActionTokenService.deleteToken(token);
+        tokenConfirmationEventEmitter.fire(new TokenConfirmationEvent(user.id, user.email, ActionType.ACTIVATE));
+    }
+
+    @Transactional
+    public void requestPasswordReset(PasswordResetRequest request) {
+        User user = userRepository.findByEmail(request.email());
+        if (user != null) {
+            var token = userActionTokenService.createForUser(user.id, ActionType.RESET);
+            String rawToken = userActionTokenService.getRawToken(token);
+            LOG.debugf("Password reset token created: %s for user %s", rawToken, user.email);
+            String resetUrl = frontendBaseUrl + "/reset-password?token=" + rawToken;
+            tokenUrlEventEmitter.fire(new TokenUrlEvent(user.id, user.email, ActionType.RESET, resetUrl));
+        }
+    }
+
+    @Transactional
+    public void resetPassword(PasswordResetUpdateRequest request) {
+        var token = userActionTokenService.findByToken(request.token(), ActionType.RESET);
+        if (token == null) {
+            throw new SecurityException("Invalid reset token");
+        }
+        User user = userRepository.findById(token.userId);
+        user.passwordHash = CryptoUtil.hashPassword(request.newPassword());
+        user.persist();
+        userActionTokenService.deleteToken(token);
+        tokenConfirmationEventEmitter.fire(new TokenConfirmationEvent(user.id, user.email, ActionType.RESET));
     }
 
     @Transactional
