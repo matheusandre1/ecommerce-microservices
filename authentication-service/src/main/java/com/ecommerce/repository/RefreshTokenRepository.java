@@ -1,13 +1,12 @@
 package com.ecommerce.repository;
 
 import com.ecommerce.entity.RefreshToken;
-import io.quarkus.hibernate.orm.panache.PanacheRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.time.LocalDateTime;
 
 @ApplicationScoped
-public class RefreshTokenRepository implements PanacheRepository<RefreshToken> {
+public class RefreshTokenRepository extends TokenRepository<RefreshToken> {
 
     public RefreshToken findByHashedToken(String hashedToken) {
         return find("hashedToken = ?1 and revoked = false and expiresAt > ?2", hashedToken, LocalDateTime.now()).firstResult();
