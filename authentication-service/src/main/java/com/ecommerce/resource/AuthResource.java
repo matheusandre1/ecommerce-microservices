@@ -37,6 +37,33 @@ public class AuthResource {
     }
 
     @POST
+    @Path("/activate")
+    public Response activate(@Valid ActivationRequest request) {
+        LOG.debugf("POST /auth/activate request received: token=%s", request.token());
+        userService.activateUser(request);
+        LOG.infof("User activated with token");
+        return Response.ok(Map.of("message", "Account activated successfully")).build();
+    }
+
+    @POST
+    @Path("/request-password-reset")
+    public Response requestPasswordReset(@Valid PasswordResetRequest request) {
+        LOG.debugf("POST /auth/request-password-reset request received: email=%s", request.email());
+        userService.requestPasswordReset(request);
+        LOG.infof("Password reset requested for: %s", request.email());
+        return Response.ok(Map.of("message", "Password reset email sent if account exists")).build();
+    }
+
+    @POST
+    @Path("/reset-password")
+    public Response resetPassword(@Valid PasswordResetUpdateRequest request) {
+        LOG.debugf("POST /auth/reset-password request received: token=%s", request.token());
+        userService.resetPassword(request);
+        LOG.infof("Password reset successfully");
+        return Response.ok(Map.of("message", "Password reset successfully")).build();
+    }
+
+    @POST
     @Path("/login")
     public Response login(@Valid LoginRequest request){
         LOG.debugf("POST /auth/login request received: email=%s", request.email());
