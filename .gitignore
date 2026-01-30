@@ -21,3 +21,5 @@ Thumbs.db
 *.log
 /.quarkus/
 /.env
+/privateKey.pem
+/publicKey.pem
