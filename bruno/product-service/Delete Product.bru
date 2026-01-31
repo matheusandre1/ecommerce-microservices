@@ -1,0 +1,15 @@
+meta {
+  name: Delete Product (Admin)
+  type: http
+  seq: 5
+}
+
+delete {
+  url: http://localhost:8082/products/{{productId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
