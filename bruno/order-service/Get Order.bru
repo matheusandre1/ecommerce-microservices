@@ -1,0 +1,11 @@
+meta {
+  name: Get Order by ID
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://localhost:8081/orders/{{orderId}}
+  body: none
+  auth: none
+}
