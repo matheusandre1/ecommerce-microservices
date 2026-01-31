@@ -49,12 +49,39 @@ The system is composed of loose-coupled microservices that communicate synchrono
    - **Redis**: Caching (Products, Auth tokens).
    - **Apache Kafka**: Event bus (`order-created`, `product-updated`, etc.).
    - **Consul**: Service Discovery.
-   
-   Use `docker-compose up -d` (if available) to start these dependencies.
 
-### Running the Services
+## 🐳 Running with Docker
 
-You can run each service individually using Maven wrapper:
+### Sequential Startup (Recommended for Development)
+
+Building multiple Quarkus services in **native mode** simultaneously is extremely resource-intensive and may cause your system to freeze. To prevent this, use the provided sequential startup script:
+
+```bash
+# To build and start everything (Sequential build)
+./sequential-up.sh --build
+
+# To just start the containers (Sequential start)
+./sequential-up.sh up
+```
+
+This script starts infrastructure first, waits for stabilization, and then builds/starts each app one by one.
+
+### Standard Management
+
+```bash
+# Stop all services
+docker-compose down
+
+# Stop all services and remove data volumes (Clean state)
+docker-compose down -v
+
+# View logs for a specific service
+docker-compose logs -f order-service
+```
+
+### Running Services Individually (Maven)
+
+If you prefer to run services manually for debugging:
 
 **Authentication Service:**
 ```bash
