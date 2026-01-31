@@ -23,3 +23,4 @@ Thumbs.db
 /.env
 /privateKey.pem
 /publicKey.pem
+/bruno/authentication-service/Auth/Login (Admin).bru
