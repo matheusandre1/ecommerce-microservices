@@ -1,0 +1,31 @@
+meta {
+  name: Create Order
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://localhost:8081/orders
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "customerName": "John Doe",
+    "customerEmail": "user@example.com",
+    "shippingCost": 15.00,
+    "items": [
+      {
+        "productId": "{{productId}}",
+        "productName": "Gaming Laptop",
+        "quantity": 1,
+        "unitPrice": 1200.00
+      }
+    ]
+  }
+}
+
+vars:post-response {
+  orderId: res.body.id
+}
