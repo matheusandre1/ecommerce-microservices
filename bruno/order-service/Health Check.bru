@@ -1,0 +1,11 @@
+meta {
+  name: Health Check
+  type: http
+  seq: 99
+}
+
+get {
+  url: http://localhost:8081/q/health
+  body: none
+  auth: none
+}
