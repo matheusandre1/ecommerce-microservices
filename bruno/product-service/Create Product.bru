@@ -1,0 +1,29 @@
+meta {
+  name: Create Product (Admin-Seller)
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8082/products
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "name": "Gaming Laptop",
+    "description": "High performance gaming laptop",
+    "price": 1200.00,
+    "stock": 10,
+    "category": "Electronics"
+  }
+}
+
+vars:post-response {
+  productId: res.body.id
+}
