@@ -10,6 +10,11 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "users")
+@SequenceGenerator(
+        name = "users_seq_gen",
+        sequenceName = "users_seq",
+        allocationSize = 50
+)
 public class User extends PanacheEntity {
 
     @NotBlank(message = "Email is required")
