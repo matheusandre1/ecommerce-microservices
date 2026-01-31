@@ -2,8 +2,10 @@ package com.ecommerce.dto;
 
 import com.ecommerce.entity.Role;
 import com.ecommerce.entity.User;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 import java.time.LocalDateTime;
 
+@RegisterForReflection
 public record UserResponse(
         Long id,
         String email,
