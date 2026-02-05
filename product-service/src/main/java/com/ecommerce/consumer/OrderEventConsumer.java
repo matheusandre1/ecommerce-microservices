@@ -2,6 +2,8 @@ package com.ecommerce.consumer;
 
 import com.ecommerce.event.OrderCreatedEvent;
 import com.ecommerce.service.ProductService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.reactive.messaging.annotations.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -16,11 +18,38 @@ public class OrderEventConsumer {
     @Inject
     ProductService productService;
 
-    @Incoming("order-created")
+    @Inject
+    ObjectMapper objectMapper;
+
+    @Incoming("order-events")
     @Blocking
-    public void onOrderCreated(OrderCreatedEvent event) {
+    public void onOrderEvent(String message) {
         try {
-            LOG.infof("[KAFKA] Received order-created event: orderId=%d, customer=%s, total=R$%.2f",
+            LOG.debugf("[KAFKA] Received message from Order.events: %s", message);
+
+            JsonNode jsonNode = objectMapper.readTree(message);
+
+            if (jsonNode.isTextual()) {
+                String innerJson = jsonNode.asText();
+                jsonNode = objectMapper.readTree(innerJson);
+                LOG.debugf("[KAFKA] Detected double-encoded JSON, parsed inner content");
+            }
+
+            if (jsonNode.has("items") && jsonNode.has("customerName")) {
+                OrderCreatedEvent event = objectMapper.treeToValue(jsonNode, OrderCreatedEvent.class);
+                handleOrderCreated(event);
+            } else {
+                LOG.debugf("[KAFKA] Ignoring non-OrderCreated event from Order.events");
+            }
+
+        } catch (Exception e) {
+            LOG.errorf(e, "[KAFKA] Failed to process Order.events message: %s", message);
+        }
+    }
+
+    private void handleOrderCreated(OrderCreatedEvent event) {
+        try {
+            LOG.infof("[KAFKA] Processing OrderCreated event: orderId=%d, customer=%s, total=R$%.2f",
                     event.orderId(), event.customerName(), event.totalAmount());
 
             for (var item : event.items()) {
@@ -32,9 +61,9 @@ public class OrderEventConsumer {
                 }
             }
 
-            LOG.infof("[KAFKA] Order-created event processed successfully: orderId=%d", event.orderId());
+            LOG.infof("[KAFKA] OrderCreated event processed successfully: orderId=%d", event.orderId());
         } catch (Exception e) {
-            LOG.errorf(e, "[KAFKA] Failed to process order-created event: orderId=%d", event.orderId());
+            LOG.errorf(e, "[KAFKA] Failed to process OrderCreated event: orderId=%d", event.orderId());
         }
     }
 }
