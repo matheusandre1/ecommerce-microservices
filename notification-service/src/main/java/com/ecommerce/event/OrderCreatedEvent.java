@@ -12,6 +12,7 @@ public record OrderCreatedEvent(
         String customerEmail,
         String status,
         BigDecimal totalAmount,
+        BigDecimal shippingCost,
         List<OrderItemEvent> items,
         LocalDateTime createdAt
 ) {
