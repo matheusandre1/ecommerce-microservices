@@ -82,13 +82,73 @@ This service is event-driven and does not expose public REST endpoints. It consu
 
 ## Development
 
-- **Code Structure**:
-    - `provider/`: Notification providers (Discord, Email).
-    - `client/`: Clients for external APIs (Discord, Brevo).
-    - `dto/`: Data transfer objects.
-    - `service/`: Business logic (NotificationService).
-    - `event/`: Kafka events.
+### Code Structure
+- **`consumer/`** - Kafka event consumers (OrderEventConsumer, ProductEventConsumer)
+  - **`OrderEventConsumer`** - Handles `Order.events` with double-encoded JSON parsing
+- **`provider/`** - Notification providers (Discord, Email)
+- **`client/`** - External API clients (DiscordWebhookClient, BrevoEmailClient)
+- **`dto/`** - Data transfer objects
+- **`service/`** - Business logic (NotificationService)
+- **`event/`** - Kafka event models (OrderCreatedEvent, OrderStatusChangedEvent, etc.)
 
-- **Tests**: Run `mvn test` for unit tests.
+### Key Implementation Details
 
-For more details, refer to the source code.
+**OrderEventConsumer** (`consumer/OrderEventConsumer.java`):
+- Consumes from `Order.events` topic (Debezium CDC output)
+- Automatically detects and handles double-encoded JSON
+- Routes events based on payload structure:
+  - `items` + `customerName` → OrderCreatedEvent
+  - `oldStatus` + `newStatus` → OrderStatusChangedEvent
+
+### Testing
+
+```bash
+# Unit tests
+mvn test
+
+# Integration test (requires running infrastructure)
+# 1. Start services: docker-compose up -d
+# 2. Create order: curl -X POST http://localhost:8081/orders ...
+# 3. Check logs: docker logs ecommerce-notification-service --tail 50
+```
+
+### Troubleshooting
+
+**Events not being processed?**
+```bash
+# Check if consuming from correct topic
+docker logs ecommerce-notification-service | grep "outbox.event.Order"
+
+# Should show:
+# ✅ "Configured topics for channel 'order-events': [outbox.event.Order]"
+# ✅ "[KAFKA] Successfully parsed OrderCreatedEvent: orderId=X"
+# ✅ "Discord rich message sent successfully"
+# ✅ "E-mail sent successfully!"
+```
+
+**Events failing consistently?**
+```bash
+# Check DLQ for failed events
+docker exec ecommerce-kafka kafka-console-consumer \
+  --bootstrap-server kafka:9092 \
+  --topic outbox.event.Order.dlq \
+  --from-beginning \
+  --timeout-ms 5000
+
+# If DLQ has messages, investigate:
+# 1. Check Discord webhook URL is valid
+# 2. Check Brevo API key is correct
+# 3. Check network connectivity
+# 4. Review full error stack traces in logs
+```
+
+**Enable DEBUG logs for detailed troubleshooting:**
+- Modify `application.properties`: Set `%prod.quarkus.log.category."com.ecommerce".level=DEBUG`
+- Rebuild and restart service
+- You'll see raw JSON payloads, HTTP requests/responses, and detailed parse information
+
+**Rebuild required after code changes:**
+- Native builds compile Java to binary at build time
+- Code changes require Docker image rebuild: `docker-compose build notification-service`
+
+For more details, refer to the source code and [main project README](../README.md).
