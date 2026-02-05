@@ -1,14 +1,18 @@
 package com.ecommerce.entity;
 
 import io.quarkus.hibernate.orm.panache.PanacheEntity;
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
+
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "outbox")
+@SequenceGenerator(
+        name = "outbox_seq_gen",
+        sequenceName = "outbox_seq",
+        allocationSize = 50
+)
 public class OutboxEvent extends PanacheEntity {
 
     @NotNull
@@ -21,10 +25,9 @@ public class OutboxEvent extends PanacheEntity {
     public String eventType;
 
     @Column(columnDefinition = "TEXT")
-    @NotNull
     public String payload;
 
-    @NotNull
+    @Column(updatable = false)
     public LocalDateTime createdAt;
 
     public OutboxEvent() {
