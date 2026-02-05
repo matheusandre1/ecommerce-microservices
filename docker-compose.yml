@@ -80,6 +80,7 @@ services:
   kafka-init:
     image: confluentinc/cp-kafka:7.5.0
     container_name: ecommerce-kafka-init
+    restart: "no"  # Run once only
     depends_on:
       kafka:
         condition: service_healthy
@@ -91,17 +92,140 @@ services:
       echo '⏳ Waiting for Kafka to be ready...'
       sleep 10
       echo '📋 Creating Kafka topics...'
-      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic order-created --partitions 3 --replication-factor 1
-      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic order-status-changed --partitions 3 --replication-factor 1
+      # Outbox Pattern - Debezium will publish to this topic
+      kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic outbox.event.Order --partitions 3 --replication-factor 1
+      # Product Service topics (direct publishing)
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic product-created --partitions 3 --replication-factor 1
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic product-updated --partitions 3 --replication-factor 1
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic product-deleted --partitions 3 --replication-factor 1
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic stock-changed --partitions 3 --replication-factor 1
+      # Other service topics
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic notification-events --partitions 2 --replication-factor 1
       kafka-topics --create --if-not-exists --bootstrap-server kafka:9092 --topic authentication-email --partitions 2 --replication-factor 1
       echo '✅ Kafka topics created successfully!'
       kafka-topics --list --bootstrap-server kafka:9092
       "
+
+  # ========================================
+  # KAFKA CONNECT (Debezium for CDC)
+  # ========================================
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: ecommerce-kafka-connect
+    ports:
+      - "8084:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: kafka-connect-cluster
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # Connector configuration
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    networks:
+      - ecommerce-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ========================================
+  # KAFKA CONNECT INIT (Register Debezium Connector)
+  # ========================================
+  kafka-connect-init:
+    image: alpine:3.19
+    container_name: ecommerce-kafka-connect-init
+    restart: "no"  # Run once only
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+    networks:
+      - ecommerce-network
+    environment:
+      # Pass PostgreSQL credentials to substitute in connector config
+      POSTGRES_HOSTNAME: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./order-service/debezium-connector-config.json:/config/connector-template.json:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Install required tools
+        apk add --no-cache curl gettext jq
+        
+        echo '⏳ Waiting for Kafka Connect to be ready...'
+        until curl -s http://kafka-connect:8083/connectors > /dev/null 2>&1; do
+          echo 'Kafka Connect not ready, retrying in 5s...'
+          sleep 5
+        done
+        echo '✅ Kafka Connect is ready!'
+        
+        echo '🔧 Preparing connector configuration with environment variables...'
+        # Use envsubst ONLY for specific variables (preserve ${routedByValue} for Debezium)
+        envsubst '$$POSTGRES_HOSTNAME $$POSTGRES_PORT $$POSTGRES_USER $$POSTGRES_PASSWORD $$POSTGRES_DB' < /config/connector-template.json > /tmp/connector.json
+        
+        echo '📋 Checking if connector exists and deleting if found...'
+        EXISTING=$$(curl -s http://kafka-connect:8083/connectors)
+        if echo "$$EXISTING" | grep -q 'order-service-outbox-connector'; then
+          echo '🗑️  Deleting existing connector...'
+          curl -s -X DELETE http://kafka-connect:8083/connectors/order-service-outbox-connector
+          sleep 3
+        fi
+        
+        echo '🔧 Registering Debezium outbox connector...'
+        echo ''
+        
+        # Register connector
+        HTTP_CODE=$$(curl -s -o /tmp/response.json -w "%{http_code}" -X POST http://kafka-connect:8083/connectors \
+          -H "Content-Type: application/json" \
+          -d @/tmp/connector.json)
+        
+        echo "HTTP Status: [$$HTTP_CODE]"
+        echo "Response:"
+        cat /tmp/response.json | jq '.' 2>/dev/null || cat /tmp/response.json
+        echo ''
+        
+        if [ "$$HTTP_CODE" != "201" ]; then
+          echo "❌ Failed to register connector (HTTP $$HTTP_CODE)"
+          exit 1
+        fi
+        
+        echo "✅ Connector registered successfully!"
+        
+        # Clean up
+        rm -f /tmp/connector.json /tmp/response.json
+        
+        echo ''
+        echo '📊 Connector status:'
+        sleep 2
+        curl -s http://kafka-connect:8083/connectors/order-service-outbox-connector/status | jq '.'
+
 
   # ========================================
   # POSTGRESQL (Order Service)
@@ -115,6 +239,15 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Enable logical replication for Debezium CDC (Change Data Capture)
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=4"
+      - "-c"
+      - "max_wal_senders=4"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -350,6 +483,8 @@ services:
         restart: true
       kafka:
         condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "true"]  # ← Simplificado (UBI Micro não tem wget/curl)
       interval: 10s
