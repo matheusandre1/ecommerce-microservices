@@ -43,6 +43,8 @@ public class BrevoEmailClient {
          LOG.infof("Sending e-mail to %s: %s",
                  request.to().getFirst().email(), request.subject());
 
+         LOG.debugf("Brevo API request: POST %s/smtp/email", apiUrl);
+
          Response response = client.target(apiUrl + "/smtp/email")
                  .request(MediaType.APPLICATION_JSON)
                  .header("api-key", apiKey.get())
@@ -64,7 +66,7 @@ public class BrevoEmailClient {
              return null;
          }
      }catch (Exception e){
-         LOG.errorf(e, "Failed to send e-mail via Brevo");
+         LOG.errorf(e, "Failed to send e-mail via Brevo: %s", e.getMessage());
          return null;
      }
     }
