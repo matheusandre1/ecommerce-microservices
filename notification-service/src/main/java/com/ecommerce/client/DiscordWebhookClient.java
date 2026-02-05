@@ -57,6 +57,8 @@ public class DiscordWebhookClient {
         }
 
         try{
+            LOG.debugf("Sending Discord rich message: title=%s, color=%s, fields=%d", title, color, fields.size());
+
             Map<String, Object> embed = Map.of(
                     "title", title,
                     "description", description,
@@ -75,16 +77,17 @@ public class DiscordWebhookClient {
                     .request(MediaType.APPLICATION_JSON)
                     .post(Entity.json(payload));
 
-            if (response.getStatus() == 204) {
-                LOG.debugf("Discord rich message sent: %s", title);
+            int status = response.getStatus();
+            if (status == 204) {
+                LOG.infof("Discord rich message sent successfully: %s", title);
             } else {
-                String errorBody = response.readEntity(String. class);
-                LOG.warnf("⚠Discord returned status %d: %s", response.getStatus(), errorBody);
+                String errorBody = response.readEntity(String.class);
+                LOG.errorf("Discord API returned error status %d: %s", status, errorBody);
             }
 
             response.close();
         } catch (Exception e) {
-            LOG.errorf("Failed to send Discord rich message");
+            LOG.errorf(e, "Failed to send Discord rich message: %s - error: %s", title, e.getMessage());
         }
     }
 
