@@ -11,10 +11,10 @@ import com.ecommerce.repository.ProductRepository;
 import io.quarkus.cache.CacheInvalidate;
 import io.quarkus.cache.CacheManager;
 import io.quarkus.cache.CacheResult;
-import io.quarkus.cache.CacheKey;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.types.ObjectId;
+import org.eclipse.microprofile.faulttolerance.Retry;
 import org.jboss.logging.Logger;
 
 import java.time.LocalDateTime;
@@ -152,56 +152,48 @@ public class ProductService {
         return deleted;
     }
 
+    @Retry(delay = 1000)
     public void decreaseStock(String productId, Integer quantity) {
-        Product product = findById(productId);
+        long updateCount = productRepository.decreaseStock(productId, quantity);
 
-        if (product == null) {
-            throw new IllegalArgumentException("Product not found: " + productId);
+        if (updateCount == 0) {
+            throw new IllegalArgumentException("Insufficient stock or product not found: " + productId);
         }
 
-        Integer oldStock = product.stock;
-        product.stock -= quantity;
-        product.updatedAt = LocalDateTime.now();
-
-        productRepository.update(product);
-        invalidateProductCaches(productId);
-        LOG.infof("Stock decreased for product %s: %d → %d", productId, oldStock, product.stock);
-
+        Product update = findById(productId);
         StockChangedEvent event = new StockChangedEvent(
-                product.id.toString(),
-                product.name,
-                oldStock,
-                product.stock,
+                update.id.toString(),
+                update.name,
+                update.stock +quantity,
+                update.stock,
                 StockChangedReason.PURCHASE,
                 LocalDateTime.now()
         );
         eventProducer.publishStockChanged(event);
+        invalidateProductCaches(productId);
+        LOG.infof("Stock decreased atomically for product %s: -%d", productId, quantity);
     }
 
-   public void increaseStock(String productId, Integer quantity) {
-        Product product = findById(productId);
+    @Retry(delay = 1000)
+    public void increaseStock(String productId, Integer quantity) {
+        long updatedCount = productRepository.increaseStock(productId, quantity);
 
-        if (product == null) {
+        if (updatedCount == 0) {
             throw new IllegalArgumentException("Product not found: " + productId);
         }
 
-        Integer oldStock = product.stock;
-        product.stock += quantity;
-        product.updatedAt = LocalDateTime.now();
-
-        productRepository.update(product);
-        invalidateProductCaches(productId);
-        LOG.infof("Stock increased for product %s: %d → %d", productId, oldStock, product.stock);
-
+        Product updated = findById(productId);
         StockChangedEvent event = new StockChangedEvent(
-                product. id.toString(),
-                product. name,
-                oldStock,
-                product.stock,
+                updated.id.toString(),
+                updated.name,
+                updated.stock - quantity,
+                updated.stock,
                 StockChangedReason.RESTOCK,
                 LocalDateTime.now()
         );
         eventProducer.publishStockChanged(event);
+        invalidateProductCaches(productId);
+        LOG.infof("Stock increased atomically for product %s: +%d", productId, quantity);
     }
 
     private void invalidateProductCaches(String productId) {
