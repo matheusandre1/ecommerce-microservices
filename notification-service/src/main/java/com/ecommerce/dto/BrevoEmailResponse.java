@@ -1,7 +1,8 @@
 package com.ecommerce.dto;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
+@RegisterForReflection
 public record BrevoEmailResponse(
-        @JsonProperty("messageId") String messageId
+        String messageId
 ) {}
