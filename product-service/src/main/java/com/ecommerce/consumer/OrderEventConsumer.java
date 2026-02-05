@@ -1,5 +1,6 @@
 package com.ecommerce.consumer;
 
+import com.ecommerce.event.OrderCancelledEvent;
 import com.ecommerce.event.OrderCreatedEvent;
 import com.ecommerce.service.ProductService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,8 +37,13 @@ public class OrderEventConsumer {
             }
 
             if (jsonNode.has("items") && jsonNode.has("customerName")) {
-                OrderCreatedEvent event = objectMapper.treeToValue(jsonNode, OrderCreatedEvent.class);
-                handleOrderCreated(event);
+                if (jsonNode.has("cancelledAt")) {
+                    OrderCancelledEvent event = objectMapper.treeToValue(jsonNode, OrderCancelledEvent.class);
+                    handleOrderCancelled(event);
+                }else {
+                    OrderCreatedEvent event = objectMapper.treeToValue(jsonNode, OrderCreatedEvent.class);
+                    handleOrderCreated(event);
+                }
             } else {
                 LOG.debugf("[KAFKA] Ignoring non-OrderCreated event from Order.events");
             }
@@ -64,6 +70,27 @@ public class OrderEventConsumer {
             LOG.infof("[KAFKA] OrderCreated event processed successfully: orderId=%d", event.orderId());
         } catch (Exception e) {
             LOG.errorf(e, "[KAFKA] Failed to process OrderCreated event: orderId=%d", event.orderId());
+        }
+    }
+
+
+    private void handleOrderCancelled(OrderCancelledEvent event) {
+        try {
+            LOG.infof("[KAFKA] Processing OrderCancelled event: orderId=%d, customer=%s, total=R$%.2f",
+                    event.orderId(), event.customerName(), event.totalAmount());
+
+            for (var item : event.items()) {
+                try {
+                    productService.increaseStock(item.productId(), item.quantity());
+                    LOG.infof("[KAFKA] Stock increased for product %s: +%d", item.productId(), item.quantity());
+                } catch (Exception e) {
+                    LOG.errorf(e, "[KAFKA] Failed to increase stock for product %s in cancelled order %d", item.productId(), event.orderId());
+                }
+            }
+
+            LOG.infof("[KAFKA] OrderCancelled event processed successfully: orderId=%d", event.orderId());
+        } catch (Exception e) {
+            LOG.errorf(e, "[KAFKA] Failed to process OrderCancelled event: orderId=%d", event.orderId());
         }
     }
 }
