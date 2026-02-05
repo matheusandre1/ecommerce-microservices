@@ -11,6 +11,7 @@ public abstract class AbstractNotificationProvider implements NotificationProvid
     public void send(NotificationRequest request) {
         if (!isEnabled()){
             log.debugf("Provider %s is disabled, skipping notification",getChannel());
+            return;
         }
 
         try{
@@ -20,7 +21,7 @@ public abstract class AbstractNotificationProvider implements NotificationProvid
 
             log.infof("Notification sent successfully via %s", getChannel());
         } catch (Exception e){
-            log.errorf("Failed to send notification via %s", getChannel());
+            log.errorf(e, "Failed to send notification via %s: %s", getChannel(), e.getMessage());
             handleError(request, e);
         }
     }
