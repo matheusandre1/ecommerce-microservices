@@ -4,15 +4,18 @@ import com.ecommerce.dto.*;
 import com.ecommerce. entity.Order;
 import com. ecommerce.entity.OrderItem;
 import com.ecommerce.entity.OrderStatus;
+import com.ecommerce.entity.OutboxEvent;
 import com.ecommerce.event.OrderCreatedEvent;
 import com.ecommerce.event.OrderStatusChangedEvent;
-import com. ecommerce.messaging.OrderEventProducer;
 import com.ecommerce.repository.OrderRepository;
-import com.ecommerce. repository.OrderItemRepository;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject. Inject;
 import jakarta.transaction. Transactional;
 import org.jboss.logging.Logger;
+
 
 import java.time.LocalDateTime;
 import java. util. List;
@@ -27,10 +30,7 @@ public class OrderService {
     OrderRepository orderRepository;
 
     @Inject
-    OrderItemRepository orderItemRepository;
-
-    @Inject
-    OrderEventProducer eventProducer;
+    ObjectMapper objectMapper;
 
     @Transactional
     public OrderResponse createOrder(CreateOrderRequest request) {
@@ -58,8 +58,26 @@ public class OrderService {
 
         OrderResponse response = OrderResponse.from(order);
 
-        OrderCreatedEvent event = OrderCreatedEvent. from(response);
-        eventProducer. publishOrderCreated(event);
+        OrderCreatedEvent event = OrderCreatedEvent.from(response);
+
+        OutboxEvent outboxEvent = null;
+        try {
+            String eventJson = objectMapper.writeValueAsString(event);
+            LOG.debugf("Serialized OrderCreatedEvent: %s", eventJson);
+
+            outboxEvent = new OutboxEvent(
+                    "Order",
+                    order.id.toString(),
+                    "OrderCreated",
+                    eventJson
+            );
+            outboxEvent.persist();
+
+            LOG.infof("Event persisted to outbox: aggregate_type=%s, event_type=%s, aggregate_id=%s",
+                    "Order", "OrderCreated", order.id);
+        } catch (JsonProcessingException e) {
+            LOG.errorf(e, "Failed to serialize OrderCreatedEvent to JSON for order: %d", order.id);
+        }
 
         return response;
     }
@@ -117,7 +135,19 @@ public class OrderService {
                 order.customerEmail,
                 LocalDateTime.now()
         );
-        eventProducer.publishOrderStatusChanged(event);
+
+        OutboxEvent outboxEvent = null;
+        try {
+            outboxEvent = new OutboxEvent(
+                    "Order",
+                    order.id.toString(),
+                    "OrderStatusChanged",
+                    objectMapper.writeValueAsString(event)
+            );
+            outboxEvent.persist();
+        } catch (JsonProcessingException e) {
+            LOG.errorf(e, "Cannot serialize event to JSON");
+        }
 
         return OrderResponse.fromWithoutItems(order);
     }
@@ -150,6 +180,24 @@ public class OrderService {
                 order.customerEmail,
                 LocalDateTime.now()
         );
-        eventProducer.publishOrderStatusChanged(event);
+
+        OutboxEvent outboxEvent = null;
+        try {
+            String eventJson = objectMapper.writeValueAsString(event);
+            LOG.debugf("Serialized OrderStatusChangedEvent (cancel): %s", eventJson);
+
+            outboxEvent = new OutboxEvent(
+                    "Order",
+                    order.id.toString(),
+                    "OrderStatusChanged",
+                    eventJson
+            );
+            outboxEvent.persist();
+
+            LOG.infof("Cancel event persisted to outbox: aggregate_type=%s, event_type=%s, aggregate_id=%s",
+                    "Order", "OrderStatusChanged", order.id);
+        } catch (JsonProcessingException e) {
+            LOG.errorf(e, "Failed to serialize OrderStatusChangedEvent to JSON for order: %d", order.id);
+        }
     }
 }
