@@ -1,0 +1,167 @@
+package com.ecommerce.resource;
+
+import com.ecommerce.entity.Product;
+import io.quarkus.test.common.http.TestHTTPEndpoint;
+import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.*;
+
+@QuarkusTest
+@TestHTTPEndpoint(ProductResource.class)
+class ProductResourceTest {
+
+    @Test
+    @TestSecurity(user = "admin", roles = "ADMIN")
+    public void create_returnsCreated_and_persists() {
+        Product product = new Product("Gaming Chair", "A comfortable chair", new BigDecimal("850.00"), 10, "Furniture");
+
+        given()
+                .body(product)
+                .contentType(ContentType.JSON)
+                .when()
+                .post()
+                .then()
+                .statusCode(201)
+                .body("name", is("Gaming Chair"))
+                .body("id", notNullValue());
+    }
+
+    @Test
+    public void findAll_returnsList() {
+        given()
+                .when()
+                .get()
+                .then()
+                .statusCode(200)
+                .body("$", hasSize(greaterThanOrEqualTo(0)))
+                .body("name", everyItem(notNullValue()));
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "ADMIN")
+    public void findById_returnsProduct_whenExists() {
+        Product product = new Product("Test Product", "Description", new BigDecimal("100.00"), 5, "Test");
+        String id = given()
+                .body(product)
+                .contentType(ContentType.JSON)
+                .header("Authorization", "Bearer admin-token")
+                .when()
+                .post()
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given()
+                .when()
+                .get("/{id}", id)
+                .then()
+                .statusCode(200)
+                .body("name", is("Test Product"));
+    }
+
+    @Test
+    public void findById_returnsNotFound_whenNotExists() {
+
+        given()
+                .when()
+                .get("/000000000000000000000000")
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
+    public void findByCategory_returnsList(){
+        given()
+                .when()
+                .get("/category/Furniture")
+                .then()
+                .statusCode(200)
+                .body("$", hasSize(greaterThanOrEqualTo(0)));
+    }
+
+    @Test
+    public void findByActive_returnsList(){
+        given()
+                .when()
+                .get("/active")
+                .then()
+                .statusCode(200)
+                .body("$", hasSize(greaterThanOrEqualTo(0)));
+    }
+
+    @Test
+    @TestSecurity(user = "seller", roles = "SELLER")
+    public void update_returnsUpdated_whenExists() {
+        Product product = new Product("Old Name", "Description", new BigDecimal("100.00"), 5, "Test");
+        String id = given()
+                .body(product)
+                .contentType(ContentType.JSON)
+                .when()
+                .post()
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        Product updatedProduct = new Product("New Name", "Updated Description", new BigDecimal("150.00"), 10, "Updated");
+
+        given()
+                .body(updatedProduct)
+                .contentType(ContentType.JSON)
+                .when()
+                .put("/{id}", id)
+                .then()
+                .statusCode(200)
+                .body("name", is("New Name"));
+    }
+
+    @Test
+    @TestSecurity(user = "seller", roles = "SELLER")
+    public void update_returnsNotFound_whenNotExists() {
+        Product updatedProduct = new Product("Name", "Description", new BigDecimal("100.00"), 5, "Test");
+
+        given()
+                .body(updatedProduct)
+                .contentType(ContentType.JSON)
+                .when()
+                .put("/000000000000000000000000")
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "ADMIN")
+    public void delete_returnsNoContent_whenExists() {
+        Product product = new Product("To Delete", "Description", new BigDecimal("100.00"), 5, "Test");
+        String id = given()
+                .body(product)
+                .contentType(ContentType.JSON)
+                .when()
+                .post()
+                .then()
+                .statusCode(201)
+                .extract().path("id");
+
+        given()
+                .when()
+                .delete("/{id}", id)
+                .then()
+                .statusCode(204);
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = "ADMIN")
+    public void delete_returnsNotFound_whenNotExists() {
+        given()
+                .when()
+                .delete("/000000000000000000000000")
+                .then()
+                .statusCode(404);
+    }
+}
