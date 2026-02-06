@@ -8,8 +8,7 @@ import com.ecommerce.event.ProductUpdatedEvent;
 import com.ecommerce.event.StockChangedEvent;
 import com.ecommerce.messaging.ProductEventProducer;
 import com.ecommerce.repository.ProductRepository;
-import io.quarkus.cache.CacheInvalidate;
-import io.quarkus.cache.CacheManager;
+import io.quarkus.cache.CacheInvalidateAll;
 import io.quarkus.cache.CacheResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -19,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @ApplicationScoped
 public class ProductService {
@@ -31,18 +31,15 @@ public class ProductService {
     @Inject
     ProductEventProducer eventProducer;
 
-    @Inject
-    CacheManager cacheManager;
-
     @CacheResult(cacheName = "products-cache")
-    public List<Product> findAll(){
+    public List<Product> findAll() {
         LOG.info("Fetching all products from MongoDB (cache miss)");
         return productRepository.listAll();
     }
 
-    @CacheResult(cacheName = "product-by-id")
-    public Product findById(String id){
-        LOG.infof("Fetching product %s from MongoDB (cache miss)", id);
+    // no per-item cache to avoid null-caching issues with Redis
+    public Product findById(String id) {
+        LOG.infof("Fetching product %s from MongoDB", id);
         return productRepository.findById(new ObjectId(id));
     }
 
@@ -58,10 +55,12 @@ public class ProductService {
         return productRepository.findActiveProducts();
     }
 
-    @CacheInvalidate(cacheName = "products-cache")
-    public Product create(Product product){
-        LOG.infof("Creating new product: %s", product. name);
-        product.createdAt = LocalDateTime. now();
+    @CacheInvalidateAll(cacheName = "products-cache")
+    @CacheInvalidateAll(cacheName = "products-by-category")
+    @CacheInvalidateAll(cacheName = "products-active")
+    public Product create(Product product) {
+        LOG.infof("Creating new product: %s", product.name);
+        product.createdAt = LocalDateTime.now();
         product.updatedAt = LocalDateTime.now();
         productRepository.persist(product);
         LOG.infof("Product created successfully with ID: %s", product.id);
@@ -79,6 +78,10 @@ public class ProductService {
         return product;
     }
 
+    // removed per-item cache invalidation (@CacheInvalidate) — keep list-level invalidations
+    @CacheInvalidateAll(cacheName = "products-cache")
+    @CacheInvalidateAll(cacheName = "products-by-category")
+    @CacheInvalidateAll(cacheName = "products-active")
     public Product update(String id, Product updatedProduct) {
         LOG.infof("Updating product: %s", id);
 
@@ -99,21 +102,21 @@ public class ProductService {
         existing.updatedAt = LocalDateTime.now();
 
         productRepository.update(existing);
-        LOG.infof("Product updated:  id=%s", id);
+        LOG.infof("Product updated: id=%s", id);
 
         ProductUpdatedEvent event = new ProductUpdatedEvent(
                 existing.id.toString(),
                 existing.name,
                 existing.category,
-                existing. price,
+                existing.price,
                 existing.stock,
                 existing.updatedAt
         );
         eventProducer.publishProductUpdated(event);
 
-        if (!oldStock.equals(existing.stock)) {
+        if (!Objects.equals(oldStock, existing.stock)) {
             StockChangedEvent stockEvent = new StockChangedEvent(
-                    existing.id. toString(),
+                    existing.id.toString(),
                     existing.name,
                     oldStock,
                     existing.stock,
@@ -122,37 +125,38 @@ public class ProductService {
             );
             eventProducer.publishStockChanged(stockEvent);
         }
-        invalidateAllProductCaches(id);
+
         return existing;
     }
 
+    @CacheInvalidateAll(cacheName = "products-cache")
+    @CacheInvalidateAll(cacheName = "products-by-category")
+    @CacheInvalidateAll(cacheName = "products-active")
     public boolean delete(String id) {
         LOG.infof("Deleting product: %s", id);
-
-        Product product = findById(id);
+        Product product = productRepository.findById(new ObjectId(id));
         if (product == null) {
             LOG.warnf("Product %s not found for deletion", id);
             return false;
         }
 
         boolean deleted = productRepository.deleteById(new ObjectId(id));
-
         if (deleted) {
-            LOG.infof("Product %s deleted successfully", id);
-
             ProductDeletedEvent event = new ProductDeletedEvent(
                     product.id.toString(),
                     product.name,
                     LocalDateTime.now()
             );
             eventProducer.publishProductDeleted(event);
+            LOG.infof("Product %s deleted successfully", id);
         }
-        invalidateAllProductCaches(id);
-
         return deleted;
     }
 
     @Retry(delay = 1000)
+    @CacheInvalidateAll(cacheName = "products-cache")
+    @CacheInvalidateAll(cacheName = "products-by-category")
+    @CacheInvalidateAll(cacheName = "products-active")
     public void decreaseStock(String productId, Integer quantity) {
         long updateCount = productRepository.decreaseStock(productId, quantity);
 
@@ -160,21 +164,27 @@ public class ProductService {
             throw new IllegalArgumentException("Insufficient stock or product not found: " + productId);
         }
 
-        Product update = findById(productId);
+        Product updated = productRepository.findById(new ObjectId(productId));
+        if (updated == null) {
+            throw new IllegalStateException("Product not found after stock decrease: " + productId);
+        }
+
         StockChangedEvent event = new StockChangedEvent(
-                update.id.toString(),
-                update.name,
-                update.stock +quantity,
-                update.stock,
+                updated.id.toString(),
+                updated.name,
+                updated.stock + quantity,
+                updated.stock,
                 StockChangedReason.PURCHASE,
                 LocalDateTime.now()
         );
         eventProducer.publishStockChanged(event);
-        invalidateProductCaches(productId);
         LOG.infof("Stock decreased atomically for product %s: -%d", productId, quantity);
     }
 
     @Retry(delay = 1000)
+    @CacheInvalidateAll(cacheName = "products-cache")
+    @CacheInvalidateAll(cacheName = "products-by-category")
+    @CacheInvalidateAll(cacheName = "products-active")
     public void increaseStock(String productId, Integer quantity) {
         long updatedCount = productRepository.increaseStock(productId, quantity);
 
@@ -182,7 +192,11 @@ public class ProductService {
             throw new IllegalArgumentException("Product not found: " + productId);
         }
 
-        Product updated = findById(productId);
+        Product updated = productRepository.findById(new ObjectId(productId));
+        if (updated == null) {
+            throw new IllegalStateException("Product not found after stock increase: " + productId);
+        }
+
         StockChangedEvent event = new StockChangedEvent(
                 updated.id.toString(),
                 updated.name,
@@ -192,19 +206,6 @@ public class ProductService {
                 LocalDateTime.now()
         );
         eventProducer.publishStockChanged(event);
-        invalidateProductCaches(productId);
         LOG.infof("Stock increased atomically for product %s: +%d", productId, quantity);
-    }
-
-    private void invalidateProductCaches(String productId) {
-        cacheManager.getCache("product-by-id").ifPresent(cache -> cache.invalidate(productId).await().indefinitely());
-        cacheManager.getCache("products-cache").ifPresent(cache -> cache.invalidateAll().await().indefinitely());
-    }
-
-    private void invalidateAllProductCaches(String productId) {
-        cacheManager.getCache("product-by-id").ifPresent(cache -> cache.invalidate(productId).await().indefinitely());
-        cacheManager.getCache("products-cache").ifPresent(cache -> cache.invalidateAll().await().indefinitely());
-        cacheManager.getCache("products-by-category").ifPresent(cache -> cache.invalidateAll().await().indefinitely());
-        cacheManager.getCache("products-active").ifPresent(cache -> cache.invalidateAll().await().indefinitely());
     }
 }
