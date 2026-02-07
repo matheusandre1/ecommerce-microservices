@@ -9,7 +9,7 @@ public record OrderCancelledEvent(
         String customerName,
         BigDecimal totalAmount,
         List<OrderItem> items,
-        LocalDateTime createdAt
+        LocalDateTime cancelledAt
 ) {
     public record OrderItem(String productId, int quantity) {}
 }
