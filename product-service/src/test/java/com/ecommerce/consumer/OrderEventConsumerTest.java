@@ -1,0 +1,82 @@
+package com.ecommerce.consumer;
+
+import com.ecommerce.entity.Product;
+import com.ecommerce.event.OrderCancelledEvent;
+import com.ecommerce.event.OrderCreatedEvent;
+import com.ecommerce.service.ProductService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.eclipse.microprofile.config.ConfigProvider;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+
+import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@QuarkusTest
+public class OrderEventConsumerTest {
+
+    @Inject
+    ProductService productService;
+
+    @Inject
+    ObjectMapper objectMapper;
+
+    private KafkaProducer<String, String> createProducer() {
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, ConfigProvider.getConfig().getValue("kafka.bootstrap.servers", String.class));
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        return new KafkaProducer<>(props);
+    }
+
+    @Test
+    public void consumeOrderCreated_decreasesStock() throws Exception {
+        Product product = new Product("Test Product", "Description", new BigDecimal("100.00"), 10, "Test Category");
+        Product created = productService.create(product);
+        String productId = created.id.toString();
+
+        OrderCreatedEvent.OrderItemEvent item = new OrderCreatedEvent.OrderItemEvent(productId, "Test Product", 2, new BigDecimal("100.00"), new BigDecimal("200.00"));
+        OrderCreatedEvent event = new OrderCreatedEvent(1L, "Customer", "customer@example.com", "CONFIRMED", new BigDecimal("200.00"), List.of(item), LocalDateTime.now());
+        String eventJson = objectMapper.writeValueAsString(event);
+
+        try (KafkaProducer<String, String> producer = createProducer()) {
+            ProducerRecord<String, String> record = new ProducerRecord<>("outbox.event.Order", productId, eventJson);
+            producer.send(record);
+        }
+
+        await().atMost(30, TimeUnit.SECONDS).until(() -> productService.findById(productId).stock == 8);
+        Product updated = productService.findById(productId);
+        assertEquals(8, updated.stock);
+    }
+
+    @Test
+    public void consumeOrderCancelled_increasesStock() throws Exception {
+        Product product = new Product("Test Product Cancel", "Description", new BigDecimal("100.00"), 10, "Test Category");
+        Product created = productService.create(product);
+        String productId = created.id.toString();
+
+        OrderCancelledEvent.OrderItem item = new OrderCancelledEvent.OrderItem(productId, 3);
+        OrderCancelledEvent event = new OrderCancelledEvent(1L, "Customer", new BigDecimal("300.00"), List.of(item), LocalDateTime.now());
+        String eventJson = objectMapper.writeValueAsString(event);
+
+        try (KafkaProducer<String, String> producer = createProducer()) {
+            ProducerRecord<String, String> record = new ProducerRecord<>("outbox.event.Order", productId, eventJson);
+            producer.send(record);
+        }
+
+        await().atMost(30, TimeUnit.SECONDS).until(() -> productService.findById(productId).stock == 13);
+        Product updated = productService.findById(productId);
+        assertEquals(13, updated.stock);
+    }
+}
